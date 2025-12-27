@@ -51,54 +51,6 @@ int build_heredoc_fd(const char *delim) {
     return pipefd[0];
 }
 
-static void exec_with_redirects(Command *cmd, int in_fd, int out_fd) {
-    if (cmd->heredoc_delim) {
-        int fd = build_heredoc_fd(cmd->heredoc_delim);
-        if (fd == -1) {
-            exit(EXIT_FAILURE);
-        }
-        in_fd = fd;
-    } else if (cmd->input_path) {
-        int fd = open(cmd->input_path, O_RDONLY);
-        if (fd == -1) {
-            perror("open");
-            exit(EXIT_FAILURE);
-        }
-        in_fd = fd;
-    }
-
-    if (in_fd != STDIN_FILENO) {
-        if (dup2(in_fd, STDIN_FILENO) == -1) {
-            perror("dup2");
-            exit(EXIT_FAILURE);
-        }
-        close(in_fd);
-    }
-
-    if (cmd->output_type == OUTPUT_REDIRECT || cmd->output_type == OUTPUT_REDIRECT_APPEND) {
-        int flags = O_CREAT | O_WRONLY;
-        flags |= (cmd->output_type == OUTPUT_REDIRECT_APPEND) ? O_APPEND : O_TRUNC;
-        int fd = open(cmd->redirect_path, flags, 0644);
-        if (fd == -1) {
-            perror("open");
-            exit(EXIT_FAILURE);
-        }
-        out_fd = fd;
-    }
-
-    if (out_fd != STDOUT_FILENO) {
-        if (dup2(out_fd, STDOUT_FILENO) == -1) {
-            perror("dup2");
-            exit(EXIT_FAILURE);
-        }
-        close(out_fd);
-    }
-
-    execvp(cmd->name, cmd->args);
-    perror("execvp");
-    exit(EXIT_FAILURE);
-}
-
 static int is_executable(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, X_OK) == 0;
@@ -299,11 +251,6 @@ int execute_commands(Pipeline *pipeline) {
         int in_fd = (i > 0) ? pipes[i - 1][0] : STDIN_FILENO;
         int out_fd = (i < pipeline->count - 1) ? pipes[i][1] : STDOUT_FILENO;
 
-        if (i < pipeline->count - 1 &&
-            (cmd->output_type == OUTPUT_REDIRECT || cmd->output_type == OUTPUT_REDIRECT_APPEND)) {
-            fprintf(stderr, "ignoring output redirection on non-final pipeline stage\n");
-        }
-
         pid_t pid = fork();
         if (pid == -1) {
             perror("fork");
@@ -319,7 +266,53 @@ int execute_commands(Pipeline *pipeline) {
                 if (k != keep_write) close(pipes[k][1]);
             }
 
-            exec_with_redirects(cmd, in_fd, out_fd);
+            // Handle input redirection
+            if (cmd->heredoc_delim) {
+                int fd = build_heredoc_fd(cmd->heredoc_delim);
+                if (fd == -1) {
+                    exit(EXIT_FAILURE);
+                }
+                in_fd = fd;
+            } else if (cmd->input_path) {
+                int fd = open(cmd->input_path, O_RDONLY);
+                if (fd == -1) {
+                    perror("open");
+                    exit(EXIT_FAILURE);
+                }
+                in_fd = fd;
+            }
+
+            if (in_fd != STDIN_FILENO) {
+                if (dup2(in_fd, STDIN_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(in_fd);
+            }
+
+            // Handle output redirection (overrides pipe output)
+            if (cmd->output_type == OUTPUT_REDIRECT || cmd->output_type == OUTPUT_REDIRECT_APPEND) {
+                int flags = O_CREAT | O_WRONLY;
+                flags |= (cmd->output_type == OUTPUT_REDIRECT_APPEND) ? O_APPEND : O_TRUNC;
+                int fd = open(cmd->redirect_path, flags, 0644);
+                if (fd == -1) {
+                    perror("open");
+                    exit(EXIT_FAILURE);
+                }
+                out_fd = fd;
+            }
+
+            if (out_fd != STDOUT_FILENO) {
+                if (dup2(out_fd, STDOUT_FILENO) == -1) {
+                    perror("dup2");
+                    exit(EXIT_FAILURE);
+                }
+                close(out_fd);
+            }
+
+            execvp(cmd->name, cmd->args);
+            perror("execvp");
+            exit(EXIT_FAILURE);
         }
 
         pids[spawned++] = pid;
