@@ -2,7 +2,7 @@ CC ?= cc
 CFLAGS ?= -Wall -Wextra -Werror -g
 INCLUDES := -Iinclude -I/opt/homebrew/opt/ncurses/include
 LDFLAGS := -L/opt/homebrew/opt/ncurses/lib -lncurses
-SRC := main.c src/command.c src/parse.c src/execute.c src/shell.c src/line_edit.c src/completion.c
+SRC := main.c src/command.c src/parse.c src/execute.c src/shell.c src/line_edit.c src/completion.c src/builtins.c
 BUILD := build
 OBJ := $(SRC:%.c=$(BUILD)/%.o)
 TARGET := minibash

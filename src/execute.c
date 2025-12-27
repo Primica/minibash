@@ -1,4 +1,5 @@
 #include "execute.h"
+#include "builtins.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,7 +11,7 @@
 #include <sys/stat.h>
 #include <limits.h>
 
-static int build_heredoc_fd(const char *delim) {
+int build_heredoc_fd(const char *delim) {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("pipe");
@@ -211,6 +212,58 @@ static int validate_commands(Pipeline *pipeline, char *suggestion, size_t sugg_s
 int execute_commands(Pipeline *pipeline) {
     if (pipeline->count <= 0) {
         return 0;
+    }
+
+    // Handle builtins (only if no pipes)
+    if (pipeline->count == 1) {
+        Command *cmd = &pipeline->cmds[0];
+        if (is_builtin(cmd->name)) {
+            // Handle redirections for builtins
+            int orig_stdin = -1, orig_stdout = -1;
+            if (cmd->heredoc_delim) {
+                orig_stdin = dup(STDIN_FILENO);
+                int fd = build_heredoc_fd(cmd->heredoc_delim);
+                if (fd == -1) return 1;
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+            } else if (cmd->input_path) {
+                orig_stdin = dup(STDIN_FILENO);
+                int fd = open(cmd->input_path, O_RDONLY);
+                if (fd == -1) {
+                    perror("open");
+                    return 1;
+                }
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+            }
+
+            if (cmd->output_type == OUTPUT_REDIRECT || cmd->output_type == OUTPUT_REDIRECT_APPEND) {
+                orig_stdout = dup(STDOUT_FILENO);
+                int flags = O_CREAT | O_WRONLY;
+                flags |= (cmd->output_type == OUTPUT_REDIRECT_APPEND) ? O_APPEND : O_TRUNC;
+                int fd = open(cmd->redirect_path, flags, 0644);
+                if (fd == -1) {
+                    perror("open");
+                    if (orig_stdin >= 0) close(orig_stdin);
+                    return 1;
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+
+            int ret = execute_builtin(cmd->name, cmd->argc, cmd->args);
+
+            if (orig_stdin >= 0) {
+                dup2(orig_stdin, STDIN_FILENO);
+                close(orig_stdin);
+            }
+            if (orig_stdout >= 0) {
+                dup2(orig_stdout, STDOUT_FILENO);
+                close(orig_stdout);
+            }
+
+            return ret;
+        }
     }
 
     char suggestion[128];

@@ -9,6 +9,7 @@
 #include "execute.h"
 #include "parse.h"
 #include "line_edit.h"
+#include "builtins.h"
 
 static int run_capture(const char *cmd, char *out, size_t out_size) {
     FILE *fp = popen(cmd, "r");
@@ -84,9 +85,15 @@ static void build_prompt(char *prompt, size_t size, int last_status) {
 }
 
 void shell_loop(void) {
+    if (builtins_init() != 0) {
+        fprintf(stderr, "failed to init builtins\n");
+        return;
+    }
+
     LineEditor *ed = line_editor_create();
     if (!ed) {
         fprintf(stderr, "failed to init line editor\n");
+        builtins_cleanup();
         return;
     }
     int last_status = 0;
@@ -118,4 +125,5 @@ void shell_loop(void) {
     }
 
     line_editor_destroy(ed);
+    builtins_cleanup();
 }
