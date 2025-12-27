@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 static int build_heredoc_fd(const char *delim) {
     int pipefd[2];
@@ -95,9 +98,131 @@ static void exec_with_redirects(Command *cmd, int in_fd, int out_fd) {
     exit(EXIT_FAILURE);
 }
 
+static int is_executable(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, X_OK) == 0;
+}
+
+static int path_lookup(const char *name) {
+    char *path = getenv("PATH");
+    if (!path) return -1;
+
+    char *dup = strdup(path);
+    if (!dup) return -1;
+
+    char *saveptr = NULL;
+    char *dir = strtok_r(dup, ":", &saveptr);
+    while (dir) {
+        char candidate[PATH_MAX];
+        snprintf(candidate, sizeof(candidate), "%s/%s", dir, name);
+        if (is_executable(candidate)) {
+            free(dup);
+            return 0;
+        }
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(dup);
+    return -1;
+}
+
+static int levenshtein(const char *a, const char *b) {
+    size_t len_a = strlen(a);
+    size_t len_b = strlen(b);
+    if (len_a > 128 || len_b > 128) return 999;
+
+    int dp[129][129];
+    for (size_t i = 0; i <= len_a; i++) dp[i][0] = (int)i;
+    for (size_t j = 0; j <= len_b; j++) dp[0][j] = (int)j;
+    for (size_t i = 1; i <= len_a; i++) {
+        for (size_t j = 1; j <= len_b; j++) {
+            int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            int del = dp[i - 1][j] + 1;
+            int ins = dp[i][j - 1] + 1;
+            int sub = dp[i - 1][j - 1] + cost;
+            int best = del < ins ? del : ins;
+            if (sub < best) best = sub;
+            dp[i][j] = best;
+        }
+    }
+    return dp[len_a][len_b];
+}
+
+static void find_suggestion(const char *name, char *suggestion, size_t size) {
+    char *path = getenv("PATH");
+    if (!path) return;
+
+    char *dup = strdup(path);
+    if (!dup) return;
+
+    int best_score = 4; // only suggest if reasonably close
+    char *saveptr = NULL;
+    char *dir = strtok_r(dup, ":", &saveptr);
+    while (dir) {
+        DIR *d = opendir(dir);
+        if (!d) {
+            dir = strtok_r(NULL, ":", &saveptr);
+            continue;
+        }
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            if (ent->d_name[0] == '.') continue;
+            int score = levenshtein(name, ent->d_name);
+            if (score < best_score) {
+                char candidate[PATH_MAX];
+                snprintf(candidate, sizeof(candidate), "%s/%s", dir, ent->d_name);
+                if (is_executable(candidate)) {
+                    best_score = score;
+                    snprintf(suggestion, size, "%s", ent->d_name);
+                }
+            }
+        }
+        closedir(d);
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(dup);
+}
+
+static int validate_commands(Pipeline *pipeline, char *suggestion, size_t sugg_size) {
+    suggestion[0] = '\0';
+    for (int i = 0; i < pipeline->count; i++) {
+        Command *cmd = &pipeline->cmds[i];
+        if (!cmd->name) return -1;
+
+        if (strchr(cmd->name, '/')) {
+            if (is_executable(cmd->name)) {
+                continue;
+            }
+            snprintf(suggestion, sugg_size, "%s", cmd->name);
+            return i;
+        }
+
+        if (path_lookup(cmd->name) == 0) {
+            continue;
+        }
+
+        find_suggestion(cmd->name, suggestion, sugg_size);
+        return i;
+    }
+    return -1;
+}
+
 int execute_commands(Pipeline *pipeline) {
     if (pipeline->count <= 0) {
         return 0;
+    }
+
+    char suggestion[128];
+    int bad_idx = validate_commands(pipeline, suggestion, sizeof(suggestion));
+    if (bad_idx >= 0) {
+        const char *name = pipeline->cmds[bad_idx].name;
+        fprintf(stderr, "minibash: command not found: %s", name);
+        if (suggestion[0] && strcmp(suggestion, name) != 0) {
+            fprintf(stderr, " (did you mean '%s'?)", suggestion);
+        }
+        fprintf(stderr, "\n");
+        return 127;
     }
 
     int pipes[MAX_CMDS - 1][2];
