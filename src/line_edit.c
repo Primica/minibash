@@ -7,6 +7,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <ncurses.h>
 
 struct LineEditor {
     struct termios orig;
@@ -87,7 +88,7 @@ static int prompt_display_len(const char *prompt) {
     return len;
 }
 
-static void refresh(const char *prompt, const char *buf, int len, int pos) {
+static void line_refresh(const char *prompt, const char *buf, int len, int pos) {
     fputs("\r", stdout);
     fputs(prompt, stdout);
     fwrite(buf, 1, (size_t)len, stdout);
@@ -112,41 +113,41 @@ static int read_key(void) {
 static void print_completions_table(Completion *comp) {
     if (!comp || comp->count == 0) return;
 
-    // Calculate max width of all items
+    // Initialize ncurses for table display
+    int max_x, max_y;
+    getmaxyx(stdscr, max_y, max_x);
+    (void)max_y;  // suppress unused warning
+
+    // Calculate column width
     int max_width = 0;
     for (int i = 0; i < comp->count; i++) {
         int len = (int)strlen(comp->matches[i]);
         if (len > max_width) max_width = len;
     }
-    max_width += 2; // Add spacing
-    if (max_width > 30) max_width = 30;
+    max_width += 2;
+    if (max_width > max_x / 2) max_width = max_x / 2;
 
-    // Calculate number of columns
-    int cols = 80 / max_width;
+    int cols = (max_x - 1) / max_width;
     if (cols < 1) cols = 1;
 
-    fputs("\n", stdout);
+    int row = 0;
     int col = 0;
     for (int i = 0; i < comp->count; i++) {
         const char *match = comp->matches[i];
-        int match_len = (int)strlen(match);
-
-        fputs(match, stdout);
+        
+        if (col == 0) {
+            move(row, 0);
+        }
+        printw("%-*s", max_width, match);
         col++;
 
         if (col >= cols) {
-            fputs("\n", stdout);
+            row++;
             col = 0;
-        } else {
-            // Pad to column width
-            for (int p = match_len; p < max_width; p++) {
-                fputc(' ', stdout);
-            }
         }
     }
-    if (col > 0) {
-        fputs("\n", stdout);
-    }
+    
+    refresh();
 }
 
 int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
@@ -174,9 +175,16 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         return -1;
     }
 
+    // Initialize ncurses
+    initscr();
+    noecho();
+    
     int cap = 256;
     char *buf = malloc((size_t)cap);
-    if (!buf) return -1;
+    if (!buf) {
+        endwin();
+        return -1;
+    }
     int len = 0;
     int pos = 0;
     int hist_pos = ed->hist_count;
@@ -188,6 +196,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         int c = read_key();
         if (c == -1) {
             free(buf);
+            endwin();
             disable_raw(ed);
             return -1;
         }
@@ -197,6 +206,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
             buf[len] = '\0';
             history_add(ed, buf);
             *out_line = buf;
+            endwin();
             disable_raw(ed);
             return len;
         }
@@ -204,6 +214,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         if (c == 4) {
             if (len == 0) {
                 free(buf);
+                endwin();
                 disable_raw(ed);
                 return -1;
             }
@@ -215,7 +226,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                 memmove(&buf[pos - 1], &buf[pos], (size_t)(len - pos));
                 pos--;
                 len--;
-                refresh(prompt, buf, len, pos);
+                line_refresh(prompt, buf, len, pos);
             }
             continue;
         }
@@ -245,6 +256,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                         char *tmp = realloc(buf, (size_t)cap);
                         if (!tmp) {
                             completion_free(comp);
+                            endwin();
                             disable_raw(ed);
                             free(buf);
                             return -1;
@@ -255,20 +267,16 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                     strcpy(word_start, match);
                     len = new_len;
                     pos = len;
-                    refresh(prompt, buf, len, pos);
+                    line_refresh(prompt, buf, len, pos);
                 } else {
+                    // Clear and show table
+                    clear();
                     print_completions_table(comp);
+                    
+                    // Redraw prompt and line
+                    move(comp->count / ((80) / 20) + 2, 0);
                     fputs(prompt, stdout);
                     fwrite(buf, 1, (size_t)len, stdout);
-                    fputs("\033[K", stdout);
-                    int prompt_len = prompt_display_len(prompt);
-                    int target = prompt_len + pos;
-                    int current = prompt_len + len;
-                    if (current > target) {
-                        char seq[32];
-                        snprintf(seq, sizeof(seq), "\033[%dD", current - target);
-                        fputs(seq, stdout);
-                    }
                     fflush(stdout);
                 }
             }
@@ -289,6 +297,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                             cap = len + 64;
                             char *tmp = realloc(buf, (size_t)cap);
                             if (!tmp) {
+                                endwin();
                                 disable_raw(ed);
                                 free(buf);
                                 return -1;
@@ -297,7 +306,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                         }
                         memcpy(buf, h, (size_t)len + 1);
                         pos = len;
-                        refresh(prompt, buf, len, pos);
+                        line_refresh(prompt, buf, len, pos);
                     }
                 } else if (c2 == 'B') {
                     if (hist_pos < ed->hist_count) {
@@ -311,6 +320,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                                 cap = len + 64;
                                 char *tmp = realloc(buf, (size_t)cap);
                                 if (!tmp) {
+                                    endwin();
                                     disable_raw(ed);
                                     free(buf);
                                     return -1;
@@ -320,17 +330,17 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                             memcpy(buf, h, (size_t)len + 1);
                         }
                         pos = len;
-                        refresh(prompt, buf, len, pos);
+                        line_refresh(prompt, buf, len, pos);
                     }
                 } else if (c2 == 'C') {
                     if (pos < len) {
                         pos++;
-                        refresh(prompt, buf, len, pos);
+                        line_refresh(prompt, buf, len, pos);
                     }
                 } else if (c2 == 'D') {
                     if (pos > 0) {
                         pos--;
-                        refresh(prompt, buf, len, pos);
+                        line_refresh(prompt, buf, len, pos);
                     }
                 }
             }
@@ -342,6 +352,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                 cap *= 2;
                 char *tmp = realloc(buf, (size_t)cap);
                 if (!tmp) {
+                    endwin();
                     disable_raw(ed);
                     free(buf);
                     return -1;
@@ -352,7 +363,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
             buf[pos] = (char)c;
             pos++;
             len++;
-            refresh(prompt, buf, len, pos);
+            line_refresh(prompt, buf, len, pos);
             continue;
         }
     }
