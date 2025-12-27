@@ -12,6 +12,7 @@ typedef struct Command {
     enum { OUTPUT_NONE, OUTPUT_PIPE, OUTPUT_REDIRECT, OUTPUT_REDIRECT_APPEND } output_type;
     char *redirect_path;
     char *input_path;
+    char *heredoc_delim;
 } Command;
 
 static void free_command(Command *cmd) {
@@ -20,6 +21,7 @@ static void free_command(Command *cmd) {
     cmd->name = NULL;
     cmd->redirect_path = NULL;
     cmd->input_path = NULL;
+    cmd->heredoc_delim = NULL;
     cmd->argc = 0;
 }
 
@@ -29,6 +31,7 @@ static void init_command(Command *cmd, int max_args) {
     cmd->name = NULL;
     cmd->redirect_path = NULL;
     cmd->input_path = NULL;
+    cmd->heredoc_delim = NULL;
     cmd->output_type = OUTPUT_NONE;
 }
 
@@ -86,6 +89,17 @@ static int parse_line(char *line, Command *cmds, int *cmd_count) {
             continue;
         }
 
+        if (strcmp(token, "<<") == 0) {
+            char *delim = strtok_r(NULL, " \n", &saveptr);
+            if (!delim) {
+                fprintf(stderr, "missing delimiter for heredoc\n");
+                return -1;
+            }
+            cmds[current].heredoc_delim = delim;
+            token = strtok_r(NULL, " \n", &saveptr);
+            continue;
+        }
+
         if (cmds[current].argc < max_args - 1) {
             cmds[current].args[cmds[current].argc++] = token;
         }
@@ -104,8 +118,57 @@ static int parse_line(char *line, Command *cmds, int *cmd_count) {
     return 1;
 }
 
+static int build_heredoc_fd(const char *delim) {
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        return -1;
+    }
+
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t nread;
+    while (1) {
+        fprintf(stdout, "heredoc> ");
+        fflush(stdout);
+        nread = getline(&line, &len, stdin);
+        if (nread == -1) {
+            break;
+        }
+
+        // Strip trailing newline for comparison
+        if (nread > 0 && line[nread - 1] == '\n') {
+            line[nread - 1] = '\0';
+        }
+
+        if (strcmp(line, delim) == 0) {
+            break;
+        }
+
+        // Restore newline when writing to pipe
+        line[nread - 1] = '\n';
+        if (write(pipefd[1], line, nread) == -1) {
+            perror("write");
+            free(line);
+            close(pipefd[0]);
+            close(pipefd[1]);
+            return -1;
+        }
+    }
+
+    free(line);
+    close(pipefd[1]);
+    return pipefd[0];
+}
+
 static void exec_with_redirects(Command *cmd, int in_fd, int out_fd) {
-    if (cmd->input_path) {
+    if (cmd->heredoc_delim) {
+        int fd = build_heredoc_fd(cmd->heredoc_delim);
+        if (fd == -1) {
+            exit(EXIT_FAILURE);
+        }
+        in_fd = fd;
+    } else if (cmd->input_path) {
         int fd = open(cmd->input_path, O_RDONLY);
         if (fd == -1) {
             perror("open");
@@ -187,10 +250,13 @@ static void execute_commands(Command *cmds, int cmd_count) {
         }
 
         if (pid == 0) {
+            int keep_read = cmds[i].heredoc_delim ? -1 : (i - 1);
+            int keep_write = (i < cmd_count - 1) ? i : -1;
+
             // Child: close unused pipe ends
             for (int k = 0; k < cmd_count - 1; k++) {
-                if (k != i - 1) close(pipes[k][0]);
-                if (k != i) close(pipes[k][1]);
+                if (k != keep_read) close(pipes[k][0]);
+                if (k != keep_write) close(pipes[k][1]);
             }
             exec_with_redirects(&cmds[i], in_fd, out_fd);
         }
