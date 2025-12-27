@@ -1,4 +1,5 @@
 #include "line_edit.h"
+#include "completion.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -184,7 +185,70 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
             continue;
         }
 
-        if (c == '\033') { // escape sequence
+        if (c == 9) { // Tab completion
+            buf[len] = '\0';
+            char *word_start = &buf[pos];
+            for (int i = pos - 1; i >= 0; i--) {
+                if (buf[i] == ' ') {
+                    word_start = &buf[i + 1];
+                    break;
+                }
+                if (i == 0) {
+                    word_start = &buf[0];
+                }
+            }
+            const char *prefix = word_start;
+            Completion *comp = completion_find(prefix);
+            if (comp && comp->count > 0) {
+                if (comp->count == 1) {
+                    // Single match: complete
+                    const char *match = comp->matches[0];
+                    int prefix_len = (int)(word_start - buf);
+                    int match_len = (int)strlen(match);
+                    int new_len = prefix_len + match_len;
+                    if (new_len >= cap) {
+                        cap = new_len + 64;
+                        char *tmp = realloc(buf, (size_t)cap);
+                        if (!tmp) {
+                            completion_free(comp);
+                            disable_raw(ed);
+                            free(buf);
+                            return -1;
+                        }
+                        buf = tmp;
+                        word_start = &buf[prefix_len];
+                    }
+                    strcpy(word_start, match);
+                    len = new_len;
+                    pos = len;
+                    refresh(prompt, buf, len, pos);
+                } else {
+                    // Multiple matches: show list
+                    fputs("\n", stdout);
+                    for (int i = 0; i < comp->count && i < 20; i++) {
+                        fprintf(stdout, "  %s\n", comp->matches[i]);
+                    }
+                    if (comp->count > 20) {
+                        fprintf(stdout, "  ... (%d more)\n", comp->count - 20);
+                    }
+                    fputs(prompt, stdout);
+                    fwrite(buf, 1, (size_t)len, stdout);
+                    fputs("\033[K", stdout);
+                    int prompt_len = prompt_display_len(prompt);
+                    int target = prompt_len + pos;
+                    int current = prompt_len + len;
+                    if (current > target) {
+                        char seq[32];
+                        snprintf(seq, sizeof(seq), "\033[%dD", current - target);
+                        fputs(seq, stdout);
+                    }
+                    fflush(stdout);
+                }
+            }
+            completion_free(comp);
+            continue;
+        }
+        if (c == 27) { // Escape sequence
             int c1 = read_key();
             int c2 = read_key();
             if (c1 == '[') {
