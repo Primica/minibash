@@ -107,20 +107,35 @@ void shell_loop(void) {
             break;
         }
 
-        Pipeline pipeline;
-        int parse_status = parse_line(line, &pipeline);
-        if (parse_status <= 0) {
-            free_pipeline(&pipeline);
-            free(line);
-            if (parse_status < 0) {
+        // Split by semicolon for chained commands
+        char *saveptr = NULL;
+        char *cmd = strtok_r(line, ";", &saveptr);
+        while (cmd) {
+            // Skip leading whitespace
+            while (*cmd == ' ' || *cmd == '\t') cmd++;
+            if (*cmd == '\0') {
+                cmd = strtok_r(NULL, ";", &saveptr);
                 continue;
             }
-            continue;
+
+            // Create a copy for parsing
+            char *cmd_copy = strdup(cmd);
+            if (!cmd_copy) {
+                cmd = strtok_r(NULL, ";", &saveptr);
+                continue;
+            }
+
+            Pipeline pipeline;
+            int parse_status = parse_line(cmd_copy, &pipeline);
+            if (parse_status > 0) {
+                last_status = execute_commands(&pipeline);
+            }
+            free_pipeline(&pipeline);
+            free(cmd_copy);
+
+            cmd = strtok_r(NULL, ";", &saveptr);
         }
 
-        last_status = execute_commands(&pipeline);
-
-        free_pipeline(&pipeline);
         free(line);
     }
 
