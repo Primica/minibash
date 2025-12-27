@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -Wall -Wextra -Werror -g
 INCLUDES := -Iinclude
-SRC := main.c src/command.c src/parse.c src/execute.c src/shell.c
+SRC := main.c src/command.c src/parse.c src/execute.c src/shell.c src/line_edit.c
 BUILD := build
 OBJ := $(SRC:%.c=$(BUILD)/%.o)
 TARGET := minibash

@@ -8,6 +8,7 @@
 
 #include "execute.h"
 #include "parse.h"
+#include "line_edit.h"
 
 static int run_capture(const char *cmd, char *out, size_t out_size) {
     FILE *fp = popen(cmd, "r");
@@ -83,14 +84,18 @@ static void build_prompt(char *prompt, size_t size, int last_status) {
 }
 
 void shell_loop(void) {
+    LineEditor *ed = line_editor_create();
+    if (!ed) {
+        fprintf(stderr, "failed to init line editor\n");
+        return;
+    }
     int last_status = 0;
     while (1) {
-        char *line = NULL;
-        size_t len = 0;
         char prompt[256];
         build_prompt(prompt, sizeof(prompt), last_status);
-        fputs(prompt, stdout);
-        if (getline(&line, &len, stdin) == -1) {
+        char *line = NULL;
+        int len = line_editor_read(ed, prompt, &line);
+        if (len < 0) {
             free(line);
             break;
         }
@@ -111,4 +116,6 @@ void shell_loop(void) {
         free_pipeline(&pipeline);
         free(line);
     }
+
+    line_editor_destroy(ed);
 }
