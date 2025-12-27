@@ -6,9 +6,11 @@ BUILD := build
 OBJ := $(SRC:%.c=$(BUILD)/%.o)
 TARGET := minibash
 
-.PHONY: all clean
+.PHONY: all clean rebuild
 
 all: $(TARGET)
+
+rebuild: clean all
 
 $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $@

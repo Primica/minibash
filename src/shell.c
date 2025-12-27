@@ -45,6 +45,11 @@ static int git_branch(char *branch, size_t size) {
 }
 
 static void build_prompt(char *prompt, size_t size) {
+    const char *c_reset = "\033[0m";
+    const char *c_prompt = "\033[38;5;45m";   // cyan-ish
+    const char *c_folder = "\033[38;5;81m";   // light cyan
+    const char *c_git = "\033[38;5;214m";     // orange
+
     char cwd[PATH_MAX] = {0};
     const char *folder = "?";
     if (getcwd(cwd, sizeof(cwd))) {
@@ -58,9 +63,14 @@ static void build_prompt(char *prompt, size_t size) {
 
     char branch[128];
     if (git_branch(branch, sizeof(branch)) == 0) {
-        snprintf(prompt, size, "minibash [%s] (git:%s) $ ", folder, branch);
+        snprintf(prompt, size, "%sminibash%s %s[%s]%s %s(git:%s)%s $ ",
+                 c_prompt, c_reset,
+                 c_folder, folder, c_reset,
+                 c_git, branch, c_reset);
     } else {
-        snprintf(prompt, size, "minibash [%s] $ ", folder);
+        snprintf(prompt, size, "%sminibash%s %s[%s]%s $ ",
+                 c_prompt, c_reset,
+                 c_folder, folder, c_reset);
     }
 }
 
