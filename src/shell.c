@@ -44,11 +44,13 @@ static int git_branch(char *branch, size_t size) {
     return -1;
 }
 
-static void build_prompt(char *prompt, size_t size) {
+static void build_prompt(char *prompt, size_t size, int last_status) {
     const char *c_reset = "\033[0m";
     const char *c_prompt = "\033[38;5;45m";   // cyan-ish
     const char *c_folder = "\033[38;5;81m";   // light cyan
     const char *c_git = "\033[38;5;214m";     // orange
+    const char *c_ok = "\033[38;5;41m";       // green
+    const char *c_err = "\033[38;5;197m";     // red
 
     char cwd[PATH_MAX] = {0};
     const char *folder = "?";
@@ -62,24 +64,31 @@ static void build_prompt(char *prompt, size_t size) {
     }
 
     char branch[128];
-    if (git_branch(branch, sizeof(branch)) == 0) {
-        snprintf(prompt, size, "%sminibash%s %s[%s]%s %s(git:%s)%s $ ",
+    int has_git = git_branch(branch, sizeof(branch)) == 0;
+
+    const char *status_color = last_status == 0 ? c_ok : c_err;
+
+    if (has_git) {
+        snprintf(prompt, size, "%sminibash%s %s[%s]%s %s(git:%s)%s %s[%d]%s $ ",
                  c_prompt, c_reset,
                  c_folder, folder, c_reset,
-                 c_git, branch, c_reset);
+                 c_git, branch, c_reset,
+                 status_color, last_status, c_reset);
     } else {
-        snprintf(prompt, size, "%sminibash%s %s[%s]%s $ ",
+        snprintf(prompt, size, "%sminibash%s %s[%s]%s %s[%d]%s $ ",
                  c_prompt, c_reset,
-                 c_folder, folder, c_reset);
+                 c_folder, folder, c_reset,
+                 status_color, last_status, c_reset);
     }
 }
 
 void shell_loop(void) {
+    int last_status = 0;
     while (1) {
         char *line = NULL;
         size_t len = 0;
         char prompt[256];
-        build_prompt(prompt, sizeof(prompt));
+        build_prompt(prompt, sizeof(prompt), last_status);
         fputs(prompt, stdout);
         if (getline(&line, &len, stdin) == -1) {
             free(line);
@@ -97,7 +106,7 @@ void shell_loop(void) {
             continue;
         }
 
-        execute_commands(&pipeline);
+        last_status = execute_commands(&pipeline);
 
         free_pipeline(&pipeline);
         free(line);

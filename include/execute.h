@@ -3,7 +3,7 @@
 
 #include "command.h"
 
-// Executes the parsed pipeline. Assumes pipeline has been filled by parse_line.
-void execute_commands(Pipeline *pipeline);
+// Executes the parsed pipeline. Returns the exit status of the last command (like $?).
+int execute_commands(Pipeline *pipeline);
 
 #endif

@@ -95,9 +95,9 @@ static void exec_with_redirects(Command *cmd, int in_fd, int out_fd) {
     exit(EXIT_FAILURE);
 }
 
-void execute_commands(Pipeline *pipeline) {
+int execute_commands(Pipeline *pipeline) {
     if (pipeline->count <= 0) {
-        return;
+        return 0;
     }
 
     int pipes[MAX_CMDS - 1][2];
@@ -108,12 +108,13 @@ void execute_commands(Pipeline *pipeline) {
                 close(pipes[k][0]);
                 close(pipes[k][1]);
             }
-            return;
+            return 127;
         }
     }
 
     pid_t pids[MAX_CMDS];
     int spawned = 0;
+    int status_code = 0;
 
     for (int i = 0; i < pipeline->count; i++) {
         Command *cmd = &pipeline->cmds[i];
@@ -152,8 +153,20 @@ void execute_commands(Pipeline *pipeline) {
     }
 
     for (int i = 0; i < spawned; i++) {
-        if (waitpid(pids[i], NULL, 0) == -1) {
+        int wstatus = 0;
+        if (waitpid(pids[i], &wstatus, 0) == -1) {
             perror("waitpid");
+            status_code = 127;
+            continue;
+        }
+        if (i == spawned - 1) {
+            if (WIFEXITED(wstatus)) {
+                status_code = WEXITSTATUS(wstatus);
+            } else if (WIFSIGNALED(wstatus)) {
+                status_code = 128 + WTERMSIG(wstatus);
+            }
         }
     }
+
+    return status_code;
 }
