@@ -163,7 +163,7 @@ static void print_completions_table(Completion *comp) {
                 const char *match = comp->matches[idx];
                 fprintf(stdout, "%-*s", col_width, match);
             }
-            fputs("\n", stdout);
+            fputs("\r\n", stdout);
         }
 
         if (end_row < total_rows) {
