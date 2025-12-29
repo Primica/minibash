@@ -7,7 +7,10 @@
 #include <termios.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <ncurses.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <signal.h>
 
 struct LineEditor {
     struct termios orig;
@@ -110,44 +113,78 @@ static int read_key(void) {
     return c;
 }
 
+static void get_term_size(int *cols, int *rows) {
+    struct winsize ws;
+    int c = 80, r = 24;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        if (ws.ws_col > 0) c = ws.ws_col;
+        if (ws.ws_row > 0) r = ws.ws_row;
+    }
+    if (cols) *cols = c;
+    if (rows) *rows = r;
+}
+
 static void print_completions_table(Completion *comp) {
     if (!comp || comp->count == 0) return;
 
-    // Initialize ncurses for table display
-    int max_x, max_y;
-    getmaxyx(stdscr, max_y, max_x);
-    (void)max_y;  // suppress unused warning
+    int term_cols = 80, term_rows = 24;
+    get_term_size(&term_cols, &term_rows);
 
-    // Calculate column width
+    // Compute max item width
     int max_width = 0;
     for (int i = 0; i < comp->count; i++) {
-        int len = (int)strlen(comp->matches[i]);
-        if (len > max_width) max_width = len;
+        int l = (int)strlen(comp->matches[i]);
+        if (l > max_width) max_width = l;
     }
-    max_width += 2;
-    if (max_width > max_x / 2) max_width = max_x / 2;
+    int col_width = max_width + 2;
+    if (col_width < 4) col_width = 4;
+    if (col_width > term_cols) col_width = term_cols;
 
-    int cols = (max_x - 1) / max_width;
+    int cols = term_cols / col_width;
     if (cols < 1) cols = 1;
+    int total_rows = (comp->count + cols - 1) / cols;
 
-    int row = 0;
-    int col = 0;
-    for (int i = 0; i < comp->count; i++) {
-        const char *match = comp->matches[i];
-        
-        if (col == 0) {
-            move(row, 0);
+    // Leave space for pager prompt and prompt redraw
+    int page_rows_max = term_rows - 3;
+    if (page_rows_max < 1) page_rows_max = 1;
+
+    // Separate suggestions from the current input line
+    fputs("\r\n", stdout);
+
+    int start_row = 0;
+    while (start_row < total_rows) {
+        int end_row = start_row + page_rows_max;
+        if (end_row > total_rows) end_row = total_rows;
+
+        for (int r = start_row; r < end_row; r++) {
+            for (int c = 0; c < cols; c++) {
+                int idx = c * total_rows + r;
+                if (idx >= comp->count) break;
+                const char *match = comp->matches[idx];
+                fprintf(stdout, "%-*s", col_width, match);
+            }
+            fputs("\n", stdout);
         }
-        printw("%-*s", max_width, match);
-        col++;
 
-        if (col >= cols) {
-            row++;
-            col = 0;
+        if (end_row < total_rows) {
+            fputs("-- More (Space next, b back, q quit) --\r\n", stdout);
+            fflush(stdout);
+            int k = read_key();
+            if (k == 'q' || k == 'Q' || k == 27) {
+                break;
+            } else if (k == 'b' || k == 'B') {
+                if (start_row >= page_rows_max) {
+                    start_row -= page_rows_max;
+                }
+            } else {
+                start_row += page_rows_max;
+            }
+        } else {
+            break;
         }
     }
-    
-    refresh();
+
+    fflush(stdout);
 }
 
 int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
@@ -175,14 +212,11 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         return -1;
     }
 
-    // Initialize ncurses
-    initscr();
-    noecho();
+    // No ncurses: we'll manage output manually
     
     int cap = 256;
     char *buf = malloc((size_t)cap);
     if (!buf) {
-        endwin();
         return -1;
     }
     int len = 0;
@@ -196,7 +230,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         int c = read_key();
         if (c == -1) {
             free(buf);
-            endwin();
             disable_raw(ed);
             return -1;
         }
@@ -206,7 +239,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
             buf[len] = '\0';
             history_add(ed, buf);
             *out_line = buf;
-            endwin();
             disable_raw(ed);
             return len;
         }
@@ -214,7 +246,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
         if (c == 4) {
             if (len == 0) {
                 free(buf);
-                endwin();
                 disable_raw(ed);
                 return -1;
             }
@@ -256,7 +287,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                         char *tmp = realloc(buf, (size_t)cap);
                         if (!tmp) {
                             completion_free(comp);
-                            endwin();
                             disable_raw(ed);
                             free(buf);
                             return -1;
@@ -269,15 +299,10 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                     pos = len;
                     line_refresh(prompt, buf, len, pos);
                 } else {
-                    // Clear and show table
-                    clear();
+                    // Show table below and then redraw prompt & current input
                     print_completions_table(comp);
-                    
-                    // Redraw prompt and line
-                    move(comp->count / ((80) / 20) + 2, 0);
-                    fputs(prompt, stdout);
-                    fwrite(buf, 1, (size_t)len, stdout);
-                    fflush(stdout);
+                    fputs("\r\n", stdout);
+                    line_refresh(prompt, buf, len, pos);
                 }
             }
             completion_free(comp);
@@ -297,7 +322,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                             cap = len + 64;
                             char *tmp = realloc(buf, (size_t)cap);
                             if (!tmp) {
-                                endwin();
                                 disable_raw(ed);
                                 free(buf);
                                 return -1;
@@ -320,7 +344,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                                 cap = len + 64;
                                 char *tmp = realloc(buf, (size_t)cap);
                                 if (!tmp) {
-                                    endwin();
                                     disable_raw(ed);
                                     free(buf);
                                     return -1;
@@ -352,7 +375,6 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                 cap *= 2;
                 char *tmp = realloc(buf, (size_t)cap);
                 if (!tmp) {
-                    endwin();
                     disable_raw(ed);
                     free(buf);
                     return -1;
