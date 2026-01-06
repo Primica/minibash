@@ -1,4 +1,4 @@
-#include "../include/shell.h"
+#include "./include/shell.h"
 
 int main(void) {
     shell_loop();

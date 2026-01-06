@@ -1,5 +1,5 @@
-#include "execute.h"
-#include "builtins.h"
+#include "../include/execute.h"
+#include "../include/builtins.h"
 
 #include <fcntl.h>
 #include <stdio.h>

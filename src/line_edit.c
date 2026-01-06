@@ -1,5 +1,5 @@
-#include "line_edit.h"
-#include "completion.h"
+#include "../include/line_edit.h"
+#include "../include/completion.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +10,6 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <signal.h>
 
 struct LineEditor {
     struct termios orig;
@@ -213,7 +212,7 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
     }
 
     // No ncurses: we'll manage output manually
-    
+
     int cap = 256;
     char *buf = malloc((size_t)cap);
     if (!buf) {

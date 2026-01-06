@@ -1,4 +1,4 @@
-#include "shell.h"
+#include "../include/shell.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,10 +6,10 @@
 #include <unistd.h>
 #include <limits.h>
 
-#include "execute.h"
-#include "parse.h"
-#include "line_edit.h"
-#include "builtins.h"
+#include "../include/execute.h"
+#include "../include/parse.h"
+#include "../include/line_edit.h"
+#include "../include/builtins.h"
 
 static int run_capture(const char *cmd, char *out, size_t out_size) {
     FILE *fp = popen(cmd, "r");

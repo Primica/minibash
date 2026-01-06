@@ -1,4 +1,4 @@
-#include "completion.h"
+#include "../include/completion.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,7 +91,7 @@ static void complete_from_fs(Completion *c, const char *prefix) {
 
         char candidate[1024];
         snprintf(candidate, sizeof(candidate), "%s/%s", dir_part, ent->d_name);
-        
+
         struct stat st;
         if (stat(candidate, &st) == 0) {
             char match[1024];
