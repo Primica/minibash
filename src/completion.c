@@ -89,19 +89,19 @@ static void complete_from_fs(Completion *c, const char *prefix) {
         if (ent->d_name[0] == '.') continue;
         if (strncmp(ent->d_name, file_part, strlen(file_part)) != 0) continue;
 
-        char candidate[512];
+        char candidate[1024];
         snprintf(candidate, sizeof(candidate), "%s/%s", dir_part, ent->d_name);
         
         struct stat st;
         if (stat(candidate, &st) == 0) {
-            char match[512];
+            char match[1024];
             if (sep) {
                 snprintf(match, sizeof(match), "%s/%s", dir_part, ent->d_name);
             } else {
                 snprintf(match, sizeof(match), "%s", ent->d_name);
             }
             if (S_ISDIR(st.st_mode)) {
-                char match_dir[512];
+                char match_dir[2048];
                 snprintf(match_dir, sizeof(match_dir), "%s/", match);
                 add_match(c, match_dir);
             } else {
