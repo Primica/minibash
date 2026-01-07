@@ -13,6 +13,9 @@ all: $(TARGET)
 
 rebuild: clean all
 
+run: $(TARGET)
+	./$(TARGET)
+
 $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS)
 
