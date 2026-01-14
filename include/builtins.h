@@ -3,6 +3,8 @@
 
 #include "command.h"
 
+#define PATH_MAX 4096
+
 typedef struct {
     char **names;
     char **values;
