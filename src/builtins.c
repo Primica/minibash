@@ -5,6 +5,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <time.h>
 
 static EnvironmentVars shell_vars = {0};
 static Aliases shell_aliases = {0};
@@ -49,7 +52,8 @@ int is_builtin(const char *cmd) {
             strcmp(cmd, "unset") == 0 ||
             strcmp(cmd, "alias") == 0 ||
             strcmp(cmd, "unalias") == 0 ||
-            strcmp(cmd, "echo") == 0);
+            strcmp(cmd, "echo") == 0 ||
+            strcmp(cmd, "ls") == 0);
 }
 
 const char *get_cwd(void) {
@@ -305,6 +309,37 @@ static int builtin_echo(int argc, char **argv) {
     return 0;
 }
 
+// Builtin: ls
+static int builtin_ls(int argc, char **argv) {
+    const char *path = argc > 1 ? argv[1] : ".";
+    DIR *dir = opendir(path);
+    if (!dir) {
+        fprintf(stderr, "minibash: ls: cannot access '%s': No such file or directory\n", path);
+        return 1;
+    }
+
+    struct dirent *entry;
+    struct stat st;
+    char filepath[PATH_MAX];
+    
+    printf("%-40s %10s %20s\n", "Name", "Size", "Modified");
+    printf("%-40s %10s %20s\n", "----", "----", "--------");
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        
+        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
+        if (stat(filepath, &st) == 0) {
+            char timestr[20];
+            strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", localtime(&st.st_mtime));
+            printf("%-40s %10ld %20s\n", entry->d_name, (long)st.st_size, timestr);
+        }
+    }
+    
+    closedir(dir);
+    return 0;
+}
+
 int execute_builtin(const char *cmd, int argc, char **argv) {
     if (!cmd) return 1;
 
@@ -317,6 +352,7 @@ int execute_builtin(const char *cmd, int argc, char **argv) {
     if (strcmp(cmd, "alias") == 0) return builtin_alias(argc, argv);
     if (strcmp(cmd, "unalias") == 0) return builtin_unalias(argc, argv);
     if (strcmp(cmd, "echo") == 0) return builtin_echo(argc, argv);
+    if (strcmp(cmd, "ls") == 0) return builtin_ls(argc, argv);
 
     return 1;
 }
