@@ -3,7 +3,7 @@
 
 #include "command.h"
 
-#define PATH_MAX 4096
+// #define PATH_MAX 4096 -- I commented this out because it was causing an error when compiling (It was already defined in macos system headers)
 
 typedef struct {
     char **names;
