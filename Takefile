@@ -1,0 +1,29 @@
+APP = minibash
+BUILD_DIR = build
+CC = cc
+CFLAGS = -Wall -Wextra -Werror -g
+INCLUDES = -Iinclude
+
+[group("build")]
+# Compile le binaire minibash
+build:
+  make
+
+# Recompile le projet depuis zero
+rebuild: clean build
+  echo "Rebuild termine pour ${APP}"
+
+[group("dev")]
+# Lance minibash en local
+run: build
+  ./${APP}
+
+[group("maintenance")]
+# Supprime les artefacts de compilation
+clean:
+  rm -rf ${BUILD_DIR}
+  rm -f ${APP}
+
+# Affiche les recettes utiles
+help:
+  take --list
