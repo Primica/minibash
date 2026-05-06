@@ -7,6 +7,7 @@ typedef struct Completion {
 } Completion;
 
 Completion *completion_find(const char *prefix);
+Completion *completion_find_dirs(const char *prefix);
 void completion_free(Completion *c);
 
 #endif

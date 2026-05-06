@@ -64,7 +64,7 @@ static void complete_from_path(Completion *c, const char *prefix) {
     free(dup);
 }
 
-static void complete_from_fs(Completion *c, const char *prefix) {
+static void complete_from_fs(Completion *c, const char *prefix, int dirs_only) {
     const char *sep = strrchr(prefix, '/');
     const char *dir_part = ".";
     const char *file_part = prefix;
@@ -104,7 +104,7 @@ static void complete_from_fs(Completion *c, const char *prefix) {
                 char match_dir[2048];
                 snprintf(match_dir, sizeof(match_dir), "%s/", match);
                 add_match(c, match_dir);
-            } else {
+            } else if (!dirs_only) {
                 add_match(c, match);
             }
         }
@@ -112,7 +112,7 @@ static void complete_from_fs(Completion *c, const char *prefix) {
     closedir(d);
 }
 
-Completion *completion_find(const char *prefix) {
+static Completion *completion_find_internal(const char *prefix, int dirs_only) {
     Completion *c = calloc(1, sizeof(Completion));
     if (!c) return NULL;
 
@@ -121,13 +121,23 @@ Completion *completion_find(const char *prefix) {
     }
 
     if (strchr(prefix, '/')) {
-        complete_from_fs(c, prefix);
+        complete_from_fs(c, prefix, dirs_only);
     } else {
-        complete_from_path(c, prefix);
-        complete_from_fs(c, prefix);
+        if (!dirs_only) {
+            complete_from_path(c, prefix);
+        }
+        complete_from_fs(c, prefix, dirs_only);
     }
 
     return c;
+}
+
+Completion *completion_find(const char *prefix) {
+    return completion_find_internal(prefix, 0);
+}
+
+Completion *completion_find_dirs(const char *prefix) {
+    return completion_find_internal(prefix, 1);
 }
 
 void completion_free(Completion *c) {

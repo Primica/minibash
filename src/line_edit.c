@@ -186,6 +186,25 @@ static void print_completions_table(Completion *comp) {
     fflush(stdout);
 }
 
+static int is_cd_argument_context(const char *buf, int pos, const char *word_start) {
+    int i = 0;
+    while (i < pos && isspace((unsigned char)buf[i])) i++;
+    if (i >= pos) return 0;
+
+    int cmd_start = i;
+    while (i < pos && !isspace((unsigned char)buf[i])) i++;
+    int cmd_len = i - cmd_start;
+
+    if (cmd_len != 2 || strncmp(&buf[cmd_start], "cd", 2) != 0) {
+        return 0;
+    }
+
+    while (i < pos && isspace((unsigned char)buf[i])) i++;
+    if (i >= pos) return 0;
+
+    return word_start >= &buf[i];
+}
+
 int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
     *out_line = NULL;
     if (!ed || !prompt) return -1;
@@ -274,7 +293,12 @@ int line_editor_read(LineEditor *ed, const char *prompt, char **out_line) {
                 }
             }
             const char *prefix = word_start;
-            Completion *comp = completion_find(prefix);
+            Completion *comp = NULL;
+            if (is_cd_argument_context(buf, pos, word_start)) {
+                comp = completion_find_dirs(prefix);
+            } else {
+                comp = completion_find(prefix);
+            }
             if (comp && comp->count > 0) {
                 if (comp->count == 1) {
                     const char *match = comp->matches[0];

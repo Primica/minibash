@@ -9,8 +9,57 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#define COLOR_RESET "\033[0m"
+#define COLOR_DIR   "\033[34m"
+#define COLOR_EXEC  "\033[32m"
+#define COLOR_LINK  "\033[36m"
+#define COLOR_HEAD  "\033[33m"
+
 static EnvironmentVars shell_vars = {0};
 static Aliases shell_aliases = {0};
+
+static int list_directory(const char *path) {
+    DIR *dir = opendir(path);
+    if (!dir) {
+        fprintf(stderr, "minibash: ls: cannot access '%s': No such file or directory\n", path);
+        return 1;
+    }
+
+    struct dirent *entry;
+    struct stat st;
+    char filepath[PATH_MAX];
+
+    printf(COLOR_HEAD "%-40s %10s %20s" COLOR_RESET "\n", "Name", "Size", "Modified");
+    printf(COLOR_HEAD "%-40s %10s %20s" COLOR_RESET "\n", "----", "----", "--------");
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+
+        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
+        if (stat(filepath, &st) == 0) {
+            char timestr[20];
+            const char *color = "";
+            const char *reset = "";
+
+            if (S_ISLNK(st.st_mode)) {
+                color = COLOR_LINK;
+                reset = COLOR_RESET;
+            } else if (S_ISDIR(st.st_mode)) {
+                color = COLOR_DIR;
+                reset = COLOR_RESET;
+            } else if (S_ISREG(st.st_mode) && access(filepath, X_OK) == 0) {
+                color = COLOR_EXEC;
+                reset = COLOR_RESET;
+            }
+
+            strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", localtime(&st.st_mtime));
+            printf("%s%-40s%s %10ld %20s\n", color, entry->d_name, reset, (long)st.st_size, timestr);
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
 
 int builtins_init(void) {
     shell_vars.cap = 64;
@@ -188,18 +237,25 @@ int unset_alias(const char *name) {
 
 // Builtin: cd
 static int builtin_cd(int argc, char **argv) {
+    const char *target = NULL;
     if (argc < 2) {
         const char *home = getenv("HOME");
-        if (home && chdir(home) == 0) return 0;
-        fprintf(stderr, "minibash: cd: home directory not set\n");
+        if (home) {
+            target = home;
+        } else {
+            fprintf(stderr, "minibash: cd: home directory not set\n");
+            return 1;
+        }
+    } else {
+        target = argv[1];
+    }
+
+    if (chdir(target) != 0) {
+        fprintf(stderr, "minibash: cd: %s: No such file or directory\n", target);
         return 1;
     }
 
-    if (chdir(argv[1]) != 0) {
-        fprintf(stderr, "minibash: cd: %s: No such file or directory\n", argv[1]);
-        return 1;
-    }
-    return 0;
+    return list_directory(".");
 }
 
 // Builtin: pwd
@@ -312,32 +368,7 @@ static int builtin_echo(int argc, char **argv) {
 // Builtin: ls
 static int builtin_ls(int argc, char **argv) {
     const char *path = argc > 1 ? argv[1] : ".";
-    DIR *dir = opendir(path);
-    if (!dir) {
-        fprintf(stderr, "minibash: ls: cannot access '%s': No such file or directory\n", path);
-        return 1;
-    }
-
-    struct dirent *entry;
-    struct stat st;
-    char filepath[PATH_MAX];
-    
-    printf("%-40s %10s %20s\n", "Name", "Size", "Modified");
-    printf("%-40s %10s %20s\n", "----", "----", "--------");
-
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        
-        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
-        if (stat(filepath, &st) == 0) {
-            char timestr[20];
-            strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", localtime(&st.st_mtime));
-            printf("%-40s %10ld %20s\n", entry->d_name, (long)st.st_size, timestr);
-        }
-    }
-    
-    closedir(dir);
-    return 0;
+    return list_directory(path);
 }
 
 int execute_builtin(const char *cmd, int argc, char **argv) {
